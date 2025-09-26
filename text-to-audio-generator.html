@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumina Audio Generators</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome for social media icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c;
+            color: #e2e8f0;
+        }
+        input, textarea, button, .section, select, .pro-feature-overlay, .plan-card {
+            border-radius: 0.5rem;
+        }
+        .message-box {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #2d3748;
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 1000;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            min-width: 250px;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .pro-feature-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(2px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            z-index: 10;
+        }
+        .pro-badge {
+            background-color: #f59e0b;
+            color: #1a202c;
+            font-weight: bold;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        .platinum-badge {
+            background-color: #e5e7eb;
+            color: #1a202c;
+            font-weight: bold;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        .plan-card.selected {
+            border: 3px solid #6ee7b7;
+            box-shadow: 0 0 15px #6ee7b7;
+        }
+        .responsive-video-container {
+            position: relative;
+            width: 100%;
+            padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+            overflow: hidden;
+            background-color: #2d3748;
+            border-radius: 0.5rem;
+        }
+        .responsive-video-container video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .banner-container {
+            width: 100%;
+            height: 700px;
+            position: relative;
+            overflow: hidden;
+        }
+        .banner-video {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            transform: translate(-50%, -50%);
+            z-index: -1;
+            object-fit: cover;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+
+        // Log all Firebase debug info to the console.
+        setLogLevel('Debug');
+
+        window.plan = 'Free';
+        window.isAuthReady = false;
+        window.userId = null;
+        window.db = null;
+        window.auth = null;
+        window.storage = null;
+        window.lastGeneratedAudioUrl = null;
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const apiKey = ""; // API key is provided by the canvas environment if left empty.
+
+        // Voice and Tone data for the dropdowns
+        const voiceData = {
+            'Woman': {
+                'Bright': 'Zephyr',
+                'Upbeat': 'Puck',
+                'Informative': 'Charon',
+                'Firm': 'Kore'
+            },
+            'Man': {
+                'Excitable': 'Fenrir',
+                'Youthful': 'Leda',
+                'Firm': 'Orus',
+                'Breezy': 'Aoede'
+            },
+            'Child Male': {
+                'Easy-going': 'Callirrhoe',
+                'Bright': 'Autonoe',
+                'Breathy': 'Enceladus'
+            },
+            'Child Female': {
+                'Clear': 'Iapetus',
+                'Easy-going': 'Umbriel',
+                'Smooth': 'Algieba'
+            }
+        };
+
+        // Initialize Firebase and set up authentication state listener
+        try {
+            const app = initializeApp(firebaseConfig);
+            window.db = getFirestore(app);
+            window.auth = getAuth(app);
+            window.storage = getStorage(app);
+
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    window.userId = user.uid;
+                    document.getElementById('user-id-display').innerText = `User ID: ${window.userId}`;
+                    window.isAuthReady = true;
+                    await loadPlan();
+                } else {
+                    window.isAuthReady = true;
+                    if (initialAuthToken) {
+                        try {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } catch (error) {
+                            console.error("Custom token sign-in failed, signing in anonymously:", error);
+                            await signInAnonymously(auth);
+                        }
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                }
+            });
+        } catch (error) {
+            console.error("Firebase initialization failed:", error);
+        }
+
+        async function savePlan(planName) {
+            if (!window.isAuthReady || !window.userId) {
+                showMessage("Authentication not ready. Please wait...", false);
+                return;
+            }
+            try {
+                const userDocRef = doc(window.db, "artifacts", appId, "users", window.userId);
+                await setDoc(userDocRef, { selectedPlan: planName }, { merge: true });
+                window.plan = planName;
+                updatePlanUI();
+                showMessage(`Plan successfully updated to ${planName}!`, false);
+                setTimeout(hideMessage, 3000);
+            } catch (error) {
+                console.error("Error saving plan:", error);
+                showMessage("Failed to save plan. Please try again.", false);
+                setTimeout(hideMessage, 3000);
+            }
+        }
+
+        async function loadPlan() {
+            if (!window.isAuthReady || !window.userId) return;
+            try {
+                const userDocRef = doc(window.db, "artifacts", appId, "users", window.userId);
+                const docSnap = await getDoc(userDocRef);
+                if (docSnap.exists()) {
+                    window.plan = docSnap.data().selectedPlan || 'Free';
+                }
+            } catch (error) {
+                console.error("Error loading plan:", error);
+                window.plan = 'Free'; // Default to free on error
+            }
+            updatePlanUI();
+        }
+
+        function updatePlanUI() {
+            document.querySelectorAll('.plan-card').forEach(card => {
+                card.classList.remove('selected');
+                card.querySelector('button').innerText = 'Upgrade';
+            });
+            const currentPlanCard = document.querySelector(`#plan-${window.plan.toLowerCase()}`);
+            if (currentPlanCard) {
+                currentPlanCard.classList.add('selected');
+                currentPlanCard.querySelector('button').innerText = 'Current Plan';
+                currentPlanCard.querySelector('button').classList.add('opacity-50', 'cursor-not-allowed');
+            }
+            if (window.plan.toLowerCase() === 'free') {
+                document.getElementById('pro-feature-overlay').classList.remove('hidden');
+                document.getElementById('platinum-feature-overlay').classList.remove('hidden');
+            } else if (window.plan.toLowerCase() === 'pro') {
+                document.getElementById('pro-feature-overlay').classList.add('hidden');
+                document.getElementById('platinum-feature-overlay').classList.remove('hidden');
+            } else if (window.plan.toLowerCase() === 'platinum') {
+                document.getElementById('pro-feature-overlay').classList.add('hidden');
+                document.getElementById('platinum-feature-overlay').classList.add('hidden');
+            }
+        }
+
+        window.savePlan = savePlan;
+        window.loadPlan = loadPlan;
+        window.updatePlanUI = updatePlanUI;
+
+
+        // Message Box and Loading Indicator
+        function showMessage(message, isLoading = false) {
+            const messageBox = document.getElementById('messageBox');
+            const messageText = document.getElementById('messageText');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+
+            messageText.innerText = message;
+            if (isLoading) {
+                loadingIndicator.classList.remove('hidden');
+            } else {
+                loadingIndicator.classList.add('hidden');
+            }
+            messageBox.style.display = 'flex';
+        }
+
+        function hideMessage() {
+            document.getElementById('messageBox').style.display = 'none';
+        }
+
+        // Helper function to convert base64 to ArrayBuffer
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        // Helper function to convert PCM audio data to a WAV file Blob
+        function pcmToWav(pcm16, sampleRate = 16000) {
+            const numChannels = 1;
+            const bytesPerSample = 2; // 16-bit
+            const blockAlign = numChannels * bytesPerSample;
+            const byteRate = sampleRate * blockAlign;
+
+            const buffer = new ArrayBuffer(44 + pcm16.length * bytesPerSample);
+            const view = new DataView(buffer);
+
+            // RIFF chunk descriptor
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + pcm16.length * bytesPerSample, true);
+            writeString(view, 8, 'WAVE');
+
+            // fmt sub-chunk
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // Audio format (1 for PCM)
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bytesPerSample * 8, true); // bits per sample
+
+            // data sub-chunk
+            writeString(view, 36, 'data');
+            view.setUint32(40, pcm16.length * bytesPerSample, true);
+
+            // Write PCM data
+            for (let i = 0; i < pcm16.length; i++) {
+                view.setInt16(44 + i * bytesPerSample, pcm16[i], true);
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+
+            function writeString(view, offset, string) {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            }
+        }
+
+        // Function to populate voice tones based on voice type selection
+        function populateVoiceTones() {
+            const voiceTypeSelect = document.getElementById('voiceTypeSelect');
+            const voiceToneSelect = document.getElementById('voiceToneSelect');
+            const voiceToneContainer = document.getElementById('voiceToneContainer');
+            const selectedType = voiceTypeSelect.value;
+
+            // Clear previous options
+            voiceToneSelect.innerHTML = '<option value="default">Select Voice Tone</option>';
+            if (selectedType === 'default') {
+                voiceToneContainer.style.display = 'none';
+                return;
+            }
+            
+            voiceToneContainer.style.display = 'block';
+            const tones = voiceData[selectedType];
+            for (const tone in tones) {
+                const option = document.createElement('option');
+                option.value = tone;
+                option.text = tone;
+                voiceToneSelect.appendChild(option);
+            }
+        }
+        document.getElementById('voiceTypeSelect').addEventListener('change', populateVoiceTones);
+
+
+        // Function to generate a text script using LLM
+        async function generateScript() {
+            const llmScriptText = document.getElementById('llmScript').value.trim();
+            const durationSelect = document.getElementById('audioDurationSelect');
+            const maxDurationSeconds = parseInt(durationSelect.value, 10);
+            const scriptReviewSection = document.getElementById('scriptReviewSection');
+            const scriptReviewBox = document.getElementById('scriptReviewBox');
+
+            if (llmScriptText === "") {
+                showMessage("Please enter a prompt to generate a script.", false);
+                setTimeout(hideMessage, 3000);
+                return;
+            }
+
+            if (maxDurationSeconds === 0) {
+                showMessage("Please select a valid audio clip duration.", false);
+                setTimeout(hideMessage, 3000);
+                return;
+            }
+
+            const minutes = maxDurationSeconds / 60;
+            const estimatedWordCount = Math.floor(minutes * 150);
+
+            const fullPrompt = `Generate a script that is approximately ${estimatedWordCount} words long, suitable for a ${minutes}-minute audio clip. The script should be about: ${llmScriptText}. Do not include any stage directions, notes, or instructions like 'music fades' or 'camera pans'. Provide only the dialogue and narrative text.`;
+
+            scriptReviewSection.classList.add('hidden');
+            scriptReviewBox.value = '';
+            showMessage("Generating script... this may take a moment.", true);
+
+            const payload = {
+                contents: [{
+                    parts: [{ text: fullPrompt }]
+                }],
+                systemInstruction: {
+                    parts: [{ text: "You are a scriptwriting assistant. Your only task is to generate clean, dialogue-only scripts. You must not include any stage directions, character names, or descriptive notes. Only provide the spoken text itself." }]
+                }
+            };
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const maxRetries = 3;
+            let currentRetry = 0;
+
+            const fetchData = async () => {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`API call failed with status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    const generatedText = result?.candidates?.[0]?.content?.parts?.[0]?.text || 'No script generated. Please try a different prompt.';
+                    
+                    document.getElementById('audioScript').value = generatedText;
+                    scriptReviewBox.value = generatedText;
+                    scriptReviewSection.classList.remove('hidden');
+                    
+                    hideMessage();
+                    showMessage("Script generated successfully! You can now edit and generate audio.", false);
+                    setTimeout(hideMessage, 5000);
+
+                } catch (error) {
+                    console.error("Error generating script:", error);
+                    if (currentRetry < maxRetries) {
+                        const delay = Math.pow(2, currentRetry) * 1000;
+                        currentRetry++;
+                        setTimeout(fetchData, delay);
+                    } else {
+                        hideMessage();
+                        showMessage("Failed to generate script after multiple retries. Please check your network connection or try again later.", false);
+                    }
+                }
+            };
+            fetchData();
+        }
+
+        // Function to generate audio from the text script
+        async function generateAudio() {
+            const audioScript = document.getElementById('audioScript').value.trim();
+            const audioTitle = document.getElementById('audioTitle').value.trim();
+            const voiceType = document.getElementById('voiceTypeSelect').value;
+            const voiceTone = document.getElementById('voiceToneSelect').value;
+            
+            if (!audioTitle) {
+                showMessage("Please enter an audio title.", false);
+                setTimeout(hideMessage, 3000);
+                return;
+            }
+
+            if (!audioScript) {
+                showMessage("Please enter a script to generate audio.", false);
+                setTimeout(hideMessage, 3000);
+                return;
+            }
+
+            if (voiceType === "default" || voiceTone === "default") {
+                showMessage("Please select a voice type and tone.", false);
+                setTimeout(hideMessage, 3000);
+                return;
+            }
+
+            const voiceName = voiceData[voiceType][voiceTone];
+            if (!voiceName) {
+                showMessage("Invalid voice selection. Please try again.", false);
+                setTimeout(hideMessage, 3000);
+                return;
+            }
+
+            showMessage("Generating audio... this may take a moment.", true);
+
+            const payload = {
+                contents: [{
+                    parts: [{
+                        text: audioScript
+                    }]
+                }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: voiceName }
+                        }
+                    }
+                }
+            };
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+            const maxRetries = 3;
+            let currentRetry = 0;
+
+            const fetchData = async () => {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`API call failed with status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    const part = result?.candidates?.[0]?.content?.parts?.[0];
+                    const audioData = part?.inlineData?.data;
+                    const mimeType = part?.inlineData?.mimeType;
+
+                    if (audioData && mimeType && mimeType.startsWith("audio/")) {
+                        const sampleRate = parseInt(mimeType.match(/rate=(\d+)/)[1], 10);
+                        const pcmData = base64ToArrayBuffer(audioData);
+                        const pcm16 = new Int16Array(pcmData);
+                        const wavBlob = pcmToWav(pcm16, sampleRate);
+                        const audioUrl = URL.createObjectURL(wavBlob);
+                        window.lastGeneratedAudioUrl = audioUrl;
+                        
+                        // Clear previous audio
+                        const audioContent = document.getElementById('audioContent');
+                        audioContent.innerHTML = '';
+                        
+                        const audioTitleEl = document.createElement('h3');
+                        audioTitleEl.className = "text-xl font-medium text-white mb-2";
+                        audioTitleEl.innerText = audioTitle;
+                        audioContent.appendChild(audioTitleEl);
+
+                        const audioElement = document.createElement('audio');
+                        audioElement.className = "w-full";
+                        audioElement.controls = true;
+                        audioElement.src = audioUrl;
+                        audioContent.appendChild(audioElement);
+
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = audioUrl;
+                        downloadLink.download = `${audioTitle.replace(/[^a-z0-9]/gi, '_')}.wav`;
+                        downloadLink.className = "mt-4 bg-teal-500 text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-teal-600 transition-colors";
+                        downloadLink.innerText = "Download Audio";
+                        audioContent.appendChild(downloadLink);
+
+                        document.getElementById('audioOutput').classList.remove('hidden');
+                        document.getElementById('shareSection').classList.remove('hidden');
+                        
+                        hideMessage();
+                        showMessage("Audio generated successfully!", false);
+                        setTimeout(hideMessage, 5000);
+
+                    } else {
+                        throw new Error("Invalid audio data from API.");
+                    }
+                } catch (error) {
+                    console.error("Error generating audio:", error);
+                    if (currentRetry < maxRetries) {
+                        const delay = Math.pow(2, currentRetry) * 1000;
+                        currentRetry++;
+                        setTimeout(fetchData, delay);
+                    } else {
+                        hideMessage();
+                        showMessage("Failed to generate audio. Please check your selections or try again later.", false);
+                    }
+                }
+            };
+            fetchData();
+        }
+
+        // Function to save the generated audio to Firebase Storage
+        async function saveAudioToFirestore() {
+            // Note: This feature is not yet fully implemented due to storage constraints.
+            // The audio URL is now stored in a local variable for sharing.
+        }
+
+        function toggleShareOptions() {
+            const shareOptions = document.getElementById('shareOptions');
+            shareOptions.classList.toggle('hidden');
+        }
+
+        function shareOnPlatform(platform) {
+            if (!window.lastGeneratedAudioUrl) {
+                showMessage("No audio to share.", false);
+                return;
+            }
+            let url = "";
+            const text = "Check out this audio clip I made with Lumina Audio Generators!";
+
+            switch (platform) {
+                case 'twitter':
+                    url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(window.lastGeneratedAudioUrl)}`;
+                    break;
+                case 'facebook':
+                    url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.lastGeneratedAudioUrl)}&quote=${encodeURIComponent(text)}`;
+                    break;
+            }
+            window.open(url, '_blank');
+        }
+
+        function copyToClipboard() {
+            if (!window.lastGeneratedAudioUrl) {
+                showMessage("No audio to copy.", false);
+                return;
+            }
+            const tempInput = document.createElement('input');
+            tempInput.value = window.lastGeneratedAudioUrl;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            showMessage("Audio link copied to clipboard!", false);
+            setTimeout(hideMessage, 3000);
+        }
+
+        function resetAll() {
+            document.getElementById('audioTitle').value = '';
+            document.getElementById('audioScript').value = '';
+            document.getElementById('llmScript').value = '';
+            document.getElementById('audioDurationSelect').value = '0';
+            document.getElementById('voiceTypeSelect').value = 'default';
+            document.getElementById('voiceToneSelect').value = 'default';
+            document.getElementById('audioOutput').classList.add('hidden');
+            document.getElementById('shareSection').classList.add('hidden');
+            document.getElementById('scriptReviewSection').classList.add('hidden');
+            populateVoiceTones();
+            hideMessage();
+        }
+
+        // Attach global functions to window object for HTML access
+        window.generateScript = generateScript;
+        window.generateAudio = generateAudio;
+        window.resetAll = resetAll;
+        window.toggleShareOptions = toggleShareOptions;
+        window.shareOnPlatform = shareOnPlatform;
+        window.copyToClipboard = copyToClipboard;
+        window.showMessage = showMessage;
+        window.hideMessage = hideMessage;
+
+    </script>
+
+    <!-- Header Section -->
+    <div class="w-full bg-gray-800 py-12 md:py-16">
+        <div class="max-w-7xl mx-auto px-4 md:px-8 flex flex-col md:flex-row items-center justify-between">
+            <div class="text-center md:text-left">
+                <h1 class="text-4xl md:text-6xl font-extrabold text-teal-400">Lumina Audio Generators</h1>
+                <p class="mt-2 text-xl md:text-2xl text-gray-300">Unleash Your Imagination</p>
+                <p class="text-base md:text-lg text-gray-400">Create, innovate, and bring your ideas to life with our powerful, easy-to-use tools.</p>
+            </div>
+            <img src="https://placehold.co/200x200/2d3748/e2e8f0?text=Logo" alt="Lumina Logo Placeholder" class="w-20 h-20 md:w-32 md:h-32 rounded-lg mt-4 md:mt-0">
+        </div>
+    </div>
+
+    <!-- Video Banner Section -->
+    <div class="w-full overflow-hidden relative">
+        <div class="responsive-video-container">
+            <video autoplay loop muted playsinline>
+                <!-- Using a royalty-free video URL from Pexels -->
+                <source src="https://assets.mixkit.co/videos/preview/mixkit-bright-neon-particles-4473-large.mp4" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
+
+
+    <!-- Main Generator Bar -->
+    <div class="bg-teal-400 py-4">
+        <h1 class="text-4xl font-extrabold text-gray-900 text-center">Text to Audio Generator</h1>
+    </div>
+
+    <div class="container mx-auto bg-gray-800 shadow-xl rounded-xl p-8 mt-8">
+        <!-- User ID Display - Moved and styled to the left -->
+        <div id="user-id-display" class="text-left text-sm text-gray-500 mb-4 px-2 truncate">
+            User ID: Loading...
+        </div>
+
+        <!-- Step-by-Step Instructions Section -->
+        <div class="mt-4 p-4 bg-gray-700 rounded-lg text-sm text-gray-300">
+            <h2 class="text-lg font-semibold mb-2 text-teal-200">Step-by-Step Instructions</h2>
+            <ol class="list-decimal list-inside space-y-2">
+                <li>Start by entering a descriptive **Audio Title**.</li>
+                <li>Choose a **Voice Type** and **Voice Tone** from the dropdown menus.</li>
+                <li>Select a specific **Audio Clip Duration**. This will determine the maximum length of your audio.</li>
+                <li>You have two options for your script:
+                    <ul class="list-disc list-inside ml-4 mt-1">
+                        <li>**Option 1: Write your own script.** Enter your text directly into the "Enter your text or script here" box.</li>
+                        <li>**Option 2: Let the AI write it for you.** Enter a prompt in the "Write the speech or script for you" box and click "Generate Script". The generated script will appear in the "Review & Edit Script" box, which you can then edit as needed.</li>
+                    </ul>
+                </li>
+                <li>When you're ready, click the **Generate Audio** button.
+                    <p class="text-sm font-semibold mb-2 text-teal-200 font-bold">Note: If the generator says your script is too long for the chosen duration, you can shorten your text or choose the next longer time duration to generate the audio.</p>
+                </li>
+            </ol>
+        </div>
+
+        <div class="space-y-4 mt-8">
+            <div>
+                <label for="audioTitle" class="block text-sm font-medium text-gray-400">Audio Title</label>
+                <input type="text" id="audioTitle" class="mt-1 block w-full bg-gray-700 border border-gray-600 text-gray-100 rounded-md shadow-sm p-3 focus:ring-teal-500 focus:border-teal-500" placeholder="e.g., 'A Midnight Ride'">
+            </div>
+
+            <!-- Free Voice Selection Dropdowns -->
+            <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+                <div class="flex-1">
+                    <label for="voiceTypeSelect" class="block text-sm font-medium text-gray-400">Select Voice Type</label>
+                    <select id="voiceTypeSelect" class="mt-1 block w-full bg-gray-700 border border-gray-600 text-gray-100 rounded-md shadow-sm p-3 focus:ring-teal-500 focus:border-teal-500">
+                        <option value="default">Select Voice Type</option>
+                        <option value="Woman">Woman</option>
+                        <option value="Man">Man</option>
+                        <option value="Child Male">Child Male</option>
+                        <option value="Child Female">Child Female</option>
+                    </select>
+                </div>
+                <div class="flex-1" id="voiceToneContainer" style="display:none;">
+                    <label for="voiceToneSelect" class="block text-sm font-medium text-gray-400">Select Voice Tone</label>
+                    <select id="voiceToneSelect" class="mt-1 block w-full bg-gray-700 border border-gray-600 text-gray-100 rounded-md shadow-sm p-3 focus:ring-teal-500 focus:border-teal-500">
+                        <option value="default">Select Voice Tone</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- New duration selection dropdown -->
+            <div>
+                <label for="audioDurationSelect" class="block text-sm font-medium text-gray-400">Audio Clip Duration</label>
+                <select id="audioDurationSelect" class="mt-1 block w-full bg-gray-700 border border-gray-600 text-gray-100 rounded-md shadow-sm p-3 focus:ring-teal-500 focus:border-teal-500">
+                    <option value="0">Select your time frame</option>
+                    <option value="60">1 minute</option>
+                    <option value="120">2 minutes</option>
+                    <option value="180">3 minutes</option>
+                    <option value="240">4 minutes</option>
+                    <option value="300">5 minutes</option>
+                </select>
+            </div>
+
+            <!-- Instructions for the duration limit -->
+            <div class="mt-4 p-4 bg-gray-700 rounded-lg text-sm text-gray-300">
+                <p>You can create as many audio clips as you want, each up to the selected duration limit. For audio longer than 5 minutes in a single file, you'll need to upgrade to a Pro plan.</p>
+                <p class="mt-2">You can always edit multiple clips together in your favorite audio or video editing software.</p>
+            </div>
+
+            <!-- Input for Audio Script -->
+            <div>
+                <label for="audioScript" class="block text-sm font-medium text-gray-400">Enter your text or script here.</label>
+                <textarea id="audioScript" rows="6" class="mt-1 block w-full bg-gray-700 border border-gray-600 text-gray-100 rounded-md shadow-sm p-3 focus:ring-teal-500 focus:border-teal-500" placeholder=""></textarea>
+            </div>
+
+            <!-- New Input for LLM Script -->
+            <div class="mt-8 pt-4 border-t border-gray-700">
+                <label for="llmScript" class="block text-sm font-medium text-gray-400">Write the speech or script for you.</label>
+                <textarea id="llmScript" rows="6" class="mt-1 block w-full bg-gray-700 border border-gray-600 text-gray-100 rounded-md shadow-sm p-3 focus:ring-teal-500 focus:border-teal-500" placeholder="e.g., a short story about a robot on a spaceship"></textarea>
+            </div>
+
+            <!-- New section for review/editing the generated script -->
+            <div id="scriptReviewSection" class="mt-6 p-6 bg-gray-700 rounded-lg hidden">
+                <h2 class="text-2xl font-semibold mb-4 text-purple-200">Review & Edit Script</h2>
+                <textarea id="scriptReviewBox" rows="6" class="mt-1 block w-full bg-gray-600 border border-gray-500 text-gray-100 rounded-md shadow-sm p-3 focus:ring-purple-500 focus:border-purple-500" placeholder="Your generated script will appear here..."></textarea>
+            </div>
+
+            <!-- Consolidated Button Group for all three buttons -->
+            <div class="flex flex-col sm:flex-row justify-center space-y-2 sm:space-y-0 sm:space-x-4 mt-6">
+                <button onClick="generateScript()" class="w-full sm:w-auto bg-purple-600 text-white font-medium py-3 px-6 rounded-lg shadow-lg hover:bg-purple-700 transition-colors">Generate Script</button>
+                <button onClick="generateAudio()" class="w-full sm:w-auto bg-blue-600 text-white font-medium py-3 px-6 rounded-lg shadow-lg hover:bg-blue-700 transition-colors">Generate Audio</button>
+                <button onClick="resetAll()" class="w-full sm:w-auto bg-gray-500 text-white font-medium py-3 px-6 rounded-lg shadow-lg hover:bg-gray-600 transition-colors">Reset All</button>
+            </div>
+
+            <!-- Upgrade Plan Section (Updated to include Firestore) -->
+            <div class="mt-8">
+                <h2 class="text-3xl font-bold text-center mb-6 text-teal-300">Choose Your Plan</h2>
+                <div class="flex flex-col md:flex-row justify-center space-y-6 md:space-y-0 md:space-x-6">
+
+                    <!-- Free Plan Card -->
+                    <div id="plan-free" class="plan-card flex-1 p-6 bg-gray-800 rounded-xl border-2 border-transparent hover:border-teal-400 transition-colors cursor-pointer" onclick="savePlan('Free')">
+                        <div class="flex flex-col items-center text-center">
+                            <span class="pro-badge mb-2">FREE BASIC PLAN</span>
+                            <p class="text-gray-400 mb-4">Perfect for trying out our services.</p>
+
+                            <div align="left">
+                                <ul class="text-gray-300 list-disc list-inside space-y-2 mb-4 text-sm">
+                                    <li>Standard Voices</li>
+                                    <li>Basic Speech Controls</li>
+                                    <li>Limited Languages</li>
+                                    <li>Up to 5 minutes of audio per clip</li>
+                                    <li>Download and Share your audio clip</li>
+                                </ul>
+                            </div>
+                            <button class="w-full bg-gray-600 text-white font-bold py-2 px-6 rounded-full opacity-50 cursor-not-allowed">Current Plan</button>
+                        </div>
+                    </div>
+
+                    <!-- Pro Plan Card -->
+                    <div id="plan-pro" class="plan-card relative flex-1 p-6 bg-gray-800 rounded-xl border-2 border-transparent hover:border-purple-400 transition-colors cursor-pointer" onclick="savePlan('Pro')">
+                        <div id="pro-feature-overlay" class="pro-feature-overlay hidden">
+                            <span class="pro-badge">PRO PLAN</span>
+                            <p class="text-white text-lg font-bold mt-2">Upgrade to Unlock</p>
+                            <p class="text-sm text-gray-300">Access these features with a Pro plan.</p>
+                        </div>
+                        <div class="flex flex-col items-center text-center">
+                            <img src="https://placehold.co/200x200/2d3748/e2e8f0?text=Pro+Badge" alt="Pro Plan Badge" class="w-12 h-12 mb-2">
+                            <span class="pro-badge mb-2">PRO PLAN</span>
+                            <p class="text-gray-400 mb-4">Same features as Basic - Plus<br>Unlock advanced features for your projects.</p>
+                            <div align="left">
+                                <ul class="text-gray-300 list-disc list-inside space-y-2 mb-4 text-sm">
+                                    <li>Expressive & High-Quality Voices</li>
+                                    <li>Multi-Speaker Conversations</li>
+                                    <li>Fine-Grained Pitch & Speed Controls</li>
+                                    <li>Generate Longer Audio Clips</li>
+                                    <li>Access All Languages</li>
+                                </ul>
+                            </div>
+                            <button class="w-full bg-purple-600 text-white font-bold py-2 px-6 rounded-full shadow-lg hover:bg-purple-700 transition-colors">Upgrade to Pro</button>
+                        </div>
+                    </div>
+
+                    <!-- Platinum Edition Card -->
+                    <div id="plan-platinum" class="plan-card relative flex-1 p-6 bg-gray-800 rounded-xl border-2 border-transparent hover:border-rose-400 transition-colors cursor-pointer" onclick="savePlan('Platinum')">
+                        <div id="platinum-feature-overlay" class="pro-feature-overlay hidden">
+                            <span class="platinum-badge">PLATINUM PLAN</span>
+                            <p class="text-white text-lg font-bold mt-2">Upgrade to Unlock</p>
+                            <p class="text-sm text-gray-300">Access these features with a Platinum plan.</p>
+                        </div>
+                        <div class="flex flex-col items-center text-center">
+                            <span class="platinum-badge mb-2">PLATINUM PLAN</span>
+                            <p class="text-gray-400 mb-4">Same features as Basic & PRO - Plus<br>Ultimate control for professional creators.</p>
+                            <div align="left">
+                                <ul class="text-gray-300 list-disc list-inside space-y-2 mb-4 text-sm">
+                                    <li>All Pro features</li>
+                                    <li>Customizable Emotional Tones</li>
+                                    <li>SSML Support for Fine-Grained Control</li>
+                                    <li>Voice Cloning</li>
+                                    <li>Integration Capabilities (APIs & SDKs)</li>
+                                </ul>
+                            </div>
+                            <button class="w-full bg-rose-600 text-white font-bold py-2 px-6 rounded-full shadow-lg hover:bg-rose-700 transition-colors">Upgrade to Platinum</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- New section for audio output -->
+        <div id="audioOutput" class="mt-6 p-6 bg-gray-700 rounded-lg hidden">
+            <h2 class="text-2xl font-semibold mb-4 text-teal-200">Generated Audio</h2>
+            <div id="audioContent" class="flex flex-col items-center space-y-4"></div>
+            <!-- Share Button & Options -->
+            <div id="shareSection" class="mt-4 hidden flex flex-col items-center space-y-4">
+                <button onClick="toggleShareOptions()" class="bg-gray-500 text-white font-medium py-2 px-4 rounded-lg shadow-lg hover:bg-gray-600 transition-colors">
+                    Share Your Audio Clip
+                </button>
+                <div id="shareOptions" class="hidden flex space-x-4">
+                    <a href="#" onclick="shareOnPlatform('twitter')" class="text-white hover:text-blue-400 transition-colors">
+                        <i class="fab fa-twitter text-2xl"></i>
+                    </a>
+                    <a href="#" onclick="shareOnPlatform('facebook')" class="text-white hover:text-blue-600 transition-colors">
+                        <i class="fab fa-facebook text-2xl"></i>
+                    </a>
+                    <button onclick="copyToClipboard()" class="text-white hover:text-gray-400 transition-colors">
+                        <i class="fas fa-link text-2xl"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer Section -->
+    <footer class="bg-white text-black py-8 mt-12">
+        <div class="container mx-auto px-4 flex flex-col md:flex-row md:justify-between md:items-center">
+            <!-- Left side: Copyright and Gemini text -->
+            <div class="text-center md:text-left">
+                <p class="text-sm md:text-base">&copy; 2025 Lumina Audio Generators. All rights reserved.</p>
+                <p class="mt-2 text-xs md:text-sm">Created with the power of Gemini.</p>
+            </div>
+            <!-- Right side: Links -->
+            <div class="mt-4 md:mt-0 flex justify-center md:justify-end space-x-4 text-sm">
+                <a href="#" class="hover:text-blue-600 transition-colors">Privacy Policy</a>
+                <span class="text-gray-400 hidden md:inline-block">|</span>
+                <a href="#" class="hover:text-blue-600 transition-colors">Terms of Service</a><br>
+                <span class="text-gray-400 hidden md:inline-block">|</span>
+                <a href="#" class="hover:text-blue-600 transition-colors">Take our other generators for test drive</a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Message Box for Alerts -->
+    <div id="messageBox" class="message-box">
+        <p id="messageText" class="text-white text-lg"></p>
+        <div id="loadingIndicator" class="hidden mt-4">
+            <div class="loading-spinner"></div>
+        </div>
+    </div>
+</body>
+</html>
